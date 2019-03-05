@@ -24,6 +24,8 @@ webserver.onstop(function(){
 var proxyClient; //a reference to the client that is the actual minecraft game
 var client; //the client to connect to 2b2t
 var server; //the minecraft server to pass packets
+var packetSave = []; //this holds a save of the packets that have been sent since we finished queue
+//currenttly stops saving once you connect, but this means you can only connect once.
 
 
 //function to disconnect from the server
@@ -41,6 +43,7 @@ function stop(){
 
 //function to start the whole thing
 function startQueuing() {
+    packetSave = [];
     webserver.isInQueue = true;
     client = mc.createClient({ //connect to 2b2t
         host: "2b2t.org",
@@ -67,14 +70,19 @@ function startQueuing() {
                 webserver.queuePlace = "FINISHED";
                 webserver.ETA = "NOW";
             }
-        } 
-    
+        }
+
+
         if (proxyClient) { //if we are connected to the proxy, forward the packet we recieved to our game.
             filterPacketAndSend(data, meta, proxyClient);
+        }else{ //else, save it.
+            if (finishedQueue && meta.name !="keep_alive" && meta.name !="update_time") {
+                packetSave.push([meta, data]);
+            }
         }
         // console.log("packet  meta: " + JSON.stringify(meta) +"\n\tdata: "+JSON.stringify(data));
     });
-    
+
     //set up actions in case we get disconnected.
     client.on('end', function(){
         if (proxyClient) {
@@ -87,13 +95,13 @@ function startQueuing() {
     client.on('error', function(err){
         if (proxyClient) {
             proxyClient.end("Connection error by 2b2t server.\n Error message: " + err + "\nReconnecting...");
-        }        
+        }
         stop();
         setTimeout(startQueuing, 100); //reconnect after 100 ms
     });
-    
-    
-    
+
+
+
     server = mc.createServer({ //create a server for us to connect to
         'online-mode':false,
         encryption:true,
@@ -102,8 +110,8 @@ function startQueuing() {
         version:'1.12.2',
         maxPlayers: 1
     })
-    
-    server.on('login', function(newProxyClient){ //handle login stuff
+
+    server.on('login', async function(newProxyClient){ //handle login stuff
         newProxyClient.write('login', {
             entityId: newProxyClient.id,
             levelType: 'default',
@@ -113,6 +121,8 @@ function startQueuing() {
             maxPlayers: server.maxPlayers,
             reducedDebugInfo: false
           });
+
+
         newProxyClient.write('position', {
             x: 0,
             y: 1.62,
@@ -120,12 +130,19 @@ function startQueuing() {
             yaw: 0,
             pitch: 0,
             flags: 0x00
-          });
-    
-          newProxyClient.on('packet', function(data, meta){//redirect everything we do to 2b2t            
-              filterPacketAndSend(data, meta, client);
-          })
-    
+        });
+
+
+        newProxyClient.on('packet', function(data, meta){//redirect everything we do to 2b2t
+            filterPacketAndSend(data, meta, client);
+            await sleep(100);
+        });
+
+        for (var packet in packetSave) { //send the backlog of packets
+          newProxyClient.write(packet[0].name, packet[1]);
+          await sleep(100);
+        }
+
         proxyClient = newProxyClient;
     });
 }
@@ -138,4 +155,10 @@ function filterPacketAndSend(data, meta, dest) {
     if (meta.name !="keep_alive" && meta.name !="update_time") { //keep alive packets are handled by the client we created, so if we were to forward them, the minecraft client would respond too and the server would kick us for responding twice.
         dest.write(meta.name, data);
     }
+}
+
+function sleep(ms){ //helper function to be able to call "await sleep()" and have the program sleep. useful for sending the backlog of packets.
+  return new Promise(resolve=>{
+    setTimeout(resolve, ms)
+  })
 }
