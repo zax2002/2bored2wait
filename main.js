@@ -76,7 +76,7 @@ function startQueuing() {
         if (proxyClient) { //if we are connected to the proxy, forward the packet we recieved to our game.
             filterPacketAndSend(data, meta, proxyClient);
         }else{ //else, save it.
-            if (finishedQueue && meta.name !="keep_alive" && meta.name !="update_time") {
+            if (finishedQueue && meta.name !="keep_alive" && meta.name !="update_time" && meta.name !="playerlist_header") {
                 packetSave.push([meta, data]);
             }
         }
